@@ -7,7 +7,10 @@ import userRoutes from "./routes/user.routes";
 import eventRoutes from "./routes/event.routes";
 import purchaseRoutes from "./routes/purchase.routes";
 import ticketRoutes from "./routes/ticket.routes";
+import uploadRoutes from "./routes/upload.routes";
+import voteRoutes from "./routes/vote.routes";
 import { globalErrorHandler } from "./middleware/error.middleware";
+import { CronService } from "./services/cron.service";
 
 const app = express();
 
@@ -21,6 +24,11 @@ app.use("/api/users", userRoutes);
 app.use("/api/events", eventRoutes);
 app.use("/api/purchases", purchaseRoutes);
 app.use("/api/tickets", ticketRoutes);
+app.use("/api/upload", uploadRoutes);
+app.use("/api/votes", voteRoutes);
+
+// Start cron jobs
+CronService.start();
 
 app.use(globalErrorHandler);
 

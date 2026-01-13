@@ -1,17 +1,9 @@
 import { Request, Response, NextFunction } from "express";
 import { UserRole } from "../models/User.model";
 
-interface AuthenticatedRequest extends Request {
-  user?: {
-    sub: string;
-    role: UserRole;
-    status: "PENDING" | "ACTIVE" | "DISABLED";
-  };
-}
-
 export const requireRole = (...allowedRoles: UserRole[]) => {
   return (
-    req: AuthenticatedRequest,
+    req: Request,
     res: Response,
     next: NextFunction
   ) => {
@@ -30,7 +22,7 @@ export const requireRole = (...allowedRoles: UserRole[]) => {
     }
 
     // Role check
-    if (!allowedRoles.includes(user.role)) {
+    if (!allowedRoles.includes(user.role as UserRole)) {
       return res.status(403).json({
         message: "Forbidden: insufficient permissions"
       });

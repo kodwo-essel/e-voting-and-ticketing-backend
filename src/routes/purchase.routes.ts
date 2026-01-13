@@ -7,7 +7,7 @@ import {
   verifyPayment,
   getPurchaseHistory,
   getEventPurchases,
-  paystackWebhook
+  paymentWebhook
 } from "../controllers/purchase.controller";
 
 const router = Router();
@@ -16,7 +16,7 @@ const router = Router();
 router.post("/tickets/initialize", initializeTicketPurchase);
 router.post("/votes/initialize", initializeVotePurchase);
 router.get("/verify/:reference", verifyPayment);
-router.post("/webhook/paystack", paystackWebhook);
+router.post("/webhook/payment", paymentWebhook);
 
 // Authenticated routes
 router.get("/history", authenticate, getPurchaseHistory);
