@@ -1,5 +1,6 @@
 import { Event, IEvent } from "../models/Event.model";
 import { AppError } from "../middleware/error.middleware";
+import { PaginationHelper } from "../utils/pagination.util";
 import { CandidateService } from "./candidate.service";
 import { CategoryService } from "./category.service";
 import { TicketService } from "./ticket.service";
@@ -173,29 +174,38 @@ export class EventService {
     return eventObj;
   }
 
-  static async getEvents(filters: any = {}, userRole?: string, userId?: string) {
-    let query: any = { isDeleted: false };
+  static async getEvents(filters: any = {}, userRole?: string, userId?: string, query?: any) {
+    let dbQuery: any = { isDeleted: false };
 
     // Role-based filtering
     if (userRole === "ORGANIZER") {
-      query.organizerId = userId;
+      dbQuery.organizerId = userId;
     } else if (!userRole || userRole === "PUBLIC") {
-      query.status = { $in: ["PUBLISHED", "LIVE"] };
-      query.isPublic = true;
+      dbQuery.status = { $in: ["PUBLISHED", "LIVE"] };
+      dbQuery.isPublic = true;
     }
     // Admin and Super Admin can see all events (no additional filters)
 
     // Apply additional filters
-    if (filters.type) query.type = filters.type;
-    if (filters.status) query.status = filters.status;
+    if (filters.type) dbQuery.type = filters.type;
+    if (filters.status) dbQuery.status = filters.status;
     if (filters.organizerId && ["ADMIN", "SUPER_ADMIN"].includes(userRole)) {
-      query.organizerId = filters.organizerId;
+      dbQuery.organizerId = filters.organizerId;
     }
 
-    const events = await Event.find(query).populate("organizerId", "fullName email").sort({ createdAt: -1 });
+    const { page, limit, skip } = PaginationHelper.getParams(query || {});
+    
+    const [events, total] = await Promise.all([
+      Event.find(dbQuery)
+        .populate("organizerId", "fullName email")
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit),
+      Event.countDocuments(dbQuery)
+    ]);
     
     // Filter response based on event type
-    return events.map(event => {
+    const filteredEvents = events.map(event => {
       const eventObj = event.toObject();
       if (eventObj.type === "VOTING") {
         delete eventObj.ticketTypes;
@@ -204,16 +214,27 @@ export class EventService {
       }
       return eventObj;
     });
+
+    return PaginationHelper.formatResponse(filteredEvents, total, page, limit);
   }
 
-  static async getMyEvents(userId: string, filters: any = {}) {
-    let query: any = { organizerId: userId, isDeleted: false };
+  static async getMyEvents(userId: string, filters: any = {}, query?: any) {
+    let dbQuery: any = { organizerId: userId, isDeleted: false };
     
-    if (filters.type) query.type = filters.type;
-    if (filters.status) query.status = filters.status;
+    if (filters.type) dbQuery.type = filters.type;
+    if (filters.status) dbQuery.status = filters.status;
 
-    const events = await Event.find(query).sort({ createdAt: -1 });
-    return events.map(event => {
+    const { page, limit, skip } = PaginationHelper.getParams(query || {});
+    
+    const [events, total] = await Promise.all([
+      Event.find(dbQuery)
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit),
+      Event.countDocuments(dbQuery)
+    ]);
+    
+    const filteredEvents = events.map(event => {
       const eventObj = event.toObject();
       if (eventObj.type === "VOTING") {
         delete eventObj.ticketTypes;
@@ -222,17 +243,29 @@ export class EventService {
       }
       return eventObj;
     });
+
+    return PaginationHelper.formatResponse(filteredEvents, total, page, limit);
   }
 
-  static async getAllEventsForAdmin(filters: any = {}) {
-    let query: any = { isDeleted: false };
+  static async getAllEventsForAdmin(filters: any = {}, query?: any) {
+    let dbQuery: any = { isDeleted: false };
     
-    if (filters.type) query.type = filters.type;
-    if (filters.status) query.status = filters.status;
-    if (filters.organizerId) query.organizerId = filters.organizerId;
+    if (filters.type) dbQuery.type = filters.type;
+    if (filters.status) dbQuery.status = filters.status;
+    if (filters.organizerId) dbQuery.organizerId = filters.organizerId;
 
-    const events = await Event.find(query).populate("organizerId", "fullName email").sort({ createdAt: -1 });
-    return events.map(event => {
+    const { page, limit, skip } = PaginationHelper.getParams(query || {});
+    
+    const [events, total] = await Promise.all([
+      Event.find(dbQuery)
+        .populate("organizerId", "fullName email")
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit),
+      Event.countDocuments(dbQuery)
+    ]);
+    
+    const filteredEvents = events.map(event => {
       const eventObj = event.toObject();
       if (eventObj.type === "VOTING") {
         delete eventObj.ticketTypes;
@@ -241,6 +274,8 @@ export class EventService {
       }
       return eventObj;
     });
+
+    return PaginationHelper.formatResponse(filteredEvents, total, page, limit);
   }
 
   static async getDeletedEvents(userRole: string) {
