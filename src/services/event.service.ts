@@ -165,7 +165,8 @@ export class EventService {
     // Only allow specific fields to be updated
     const allowedFields = [
       'title', 'description', 'startDate', 'endDate', 'venue', 'isPublic',
-      'costPerVote', 'minVotesPerPurchase', 'maxVotesPerPurchase', 'allowPublicNominations'
+      'costPerVote', 'minVotesPerPurchase', 'maxVotesPerPurchase', 'allowPublicNominations',
+      'whatsappGroupLink'
     ];
     
     const filteredData: any = {};

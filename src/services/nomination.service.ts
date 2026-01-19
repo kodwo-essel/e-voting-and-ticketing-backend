@@ -3,6 +3,7 @@ import { NominationForm } from "../models/NominationForm.model";
 import { Event } from "../models/Event.model";
 import { AppError } from "../middleware/error.middleware";
 import { EventService } from "./event.service";
+import { SMSService } from "./sms.service";
 import { PaginationHelper } from "../utils/pagination.util";
 
 export class NominationService {
@@ -146,7 +147,7 @@ export class NominationService {
 
     // Create new candidate
     const candidateCode = EventService.generateCandidateCode();
-    category.candidates.push({
+    const newCandidate = {
       name: nomination.nomineeName,
       email: "",
       phone: nomination.nomineePhone,
@@ -154,11 +155,26 @@ export class NominationService {
       description: nomination.bio,
       code: candidateCode,
       votes: 0
-    });
-
+    };
+    
+    category.candidates.push(newCandidate);
     await event.save();
+    
     nomination.status = "APPROVED";
     await nomination.save();
+    
+    // Send welcome SMS to the new candidate
+    try {
+      let message = `Hello ${nomination.nomineeName}! You've been approved as a candidate for "${event.title}" in the "${category.name}" category. Good luck!`;
+      
+      if (event.whatsappGroupLink) {
+        message += ` Join the candidates' WhatsApp group: ${event.whatsappGroupLink}`;
+      }
+      
+      await SMSService.sendCustomMessage(nomination.nomineePhone, message);
+    } catch (error) {
+      console.error('Failed to send candidate welcome SMS:', error);
+    }
 
     return { message: "Nomination approved and candidate created", nomination };
   }

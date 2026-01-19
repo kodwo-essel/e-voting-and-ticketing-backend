@@ -4,6 +4,7 @@ import { Ticket } from "../models/Ticket.model";
 import { Settings } from "../models/Settings.model";
 import { PaystackService } from "./paystack.service";
 import { FlutterwaveService } from "./flutterwave.service";
+import { AppsMobileService } from "./appsmobile.service";
 import { AppError } from "../middleware/error.middleware";
 import { PaginationHelper } from "../utils/pagination.util";
 import crypto from "crypto";
@@ -18,7 +19,7 @@ interface PaymentVerificationResult {
   gatewayData?: any;
 }
 
-type PaymentGateway = 'paystack' | 'flutterwave';
+type PaymentGateway = 'paystack' | 'flutterwave' | 'appsmobile';
 
 export class PurchaseService {
   private static async getDefaultGateway(): Promise<PaymentGateway> {
@@ -32,6 +33,8 @@ export class PurchaseService {
         return new PaystackService();
       case 'flutterwave':
         return new FlutterwaveService();
+      case 'appsmobile':
+        return new AppsMobileService();
       default:
         return new PaystackService();
     }
@@ -361,6 +364,8 @@ export class PurchaseService {
       gateway = 'paystack';
     } else if (req.headers['verif-hash']) {
       gateway = 'flutterwave';
+    } else if (req.body.trans_status) {
+      gateway = 'appsmobile';
     }
     
     const gatewayService = this.getGatewayService(gateway);

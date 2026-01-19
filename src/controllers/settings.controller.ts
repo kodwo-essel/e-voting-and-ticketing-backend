@@ -17,7 +17,7 @@ export class SettingsController {
   static async setPaymentGateway(req: Request, res: Response) {
     const { gateway } = req.body;
     
-    if (!["paystack", "flutterwave"].includes(gateway)) {
+    if (!["paystack", "flutterwave", "appsmobile"].includes(gateway)) {
       throw new AppError("Invalid payment gateway", 400);
     }
 
