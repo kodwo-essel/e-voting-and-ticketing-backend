@@ -67,6 +67,26 @@ NALO_PASSWORD=your-nalo-password
 NALO_SENDER_ID=YourSenderID
 ```
 
+### USSD Service
+
+**Note:** USSD provider and payment gateway are managed via database settings through API endpoints (Super Admin only).
+
+**Default Settings:**
+- USSD Provider: `nalo`
+- USSD Payment Gateway: `appsmobile`
+
+**API Endpoints:**
+```
+PUT /api/admin/settings
+Body: { "key": "ussd_provider", "value": "nalo" }
+
+PUT /api/admin/settings  
+Body: { "key": "ussd_payment_gateway", "value": "appsmobile" }
+
+GET /api/admin/settings
+GET /api/admin/settings/:key
+```
+
 ### File Upload (Cloudinary)
 ```env
 CLOUDINARY_CLOUD_NAME=your-cloudinary-cloud-name
@@ -105,6 +125,8 @@ SMS_PROVIDER=nalo
 NALO_USERNAME=your_nalo_username
 NALO_PASSWORD=your_nalo_password
 NALO_SENDER_ID=EaseVote
+
+# Note: USSD settings are managed via database/API
 
 # File Upload
 CLOUDINARY_CLOUD_NAME=your_cloudinary_name

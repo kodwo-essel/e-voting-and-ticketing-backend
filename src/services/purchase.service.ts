@@ -90,6 +90,7 @@ export class PurchaseService {
       eventId: data.eventId,
       userId: data.userId,
       type: "TICKET",
+      source: "web",
       paymentReference: reference,
       amount,
       ticketTypeId: data.ticketTypeId,
@@ -183,6 +184,7 @@ export class PurchaseService {
       eventId: data.eventId,
       userId: data.userId,
       type: "VOTE",
+      source: "web",
       paymentReference: reference,
       amount,
       candidateId: data.candidateId,
@@ -442,5 +444,163 @@ export class PurchaseService {
     // Remove reservation
     ticketType.reserved = Math.max(0, (ticketType.reserved || 0) - purchase.ticketQuantity!);
     await event.save();
+  }
+
+  static async initializeTicketPurchaseUSSD(data: {
+    eventId: string;
+    ticketTypeId: string;
+    quantity: number;
+    customerPhone: string;
+    network: string;
+    source: "ussd";
+  }) {
+    const event = await Event.findById(data.eventId);
+    if (!event) {
+      throw new AppError("Event not found", 404);
+    }
+
+    if (event.status !== "PUBLISHED" && event.status !== "LIVE") {
+      throw new AppError("Event not available for ticket purchase", 400);
+    }
+
+    const ticketType = event.ticketTypes?.find(tt => tt._id?.toString() === data.ticketTypeId);
+    if (!ticketType) {
+      throw new AppError("Ticket type not found", 404);
+    }
+
+    const totalUnavailable = (ticketType.sold || 0) + (ticketType.reserved || 0);
+    if (totalUnavailable + data.quantity > ticketType.quantity) {
+      throw new AppError("Not enough tickets available", 400);
+    }
+
+    ticketType.reserved = (ticketType.reserved || 0) + data.quantity;
+    await event.save();
+
+    const amount = ticketType.price * data.quantity;
+    const reference = this.generateReference();
+    const expiresAt = new Date(Date.now() + 30.5 * 60 * 1000);
+
+    const purchase = await Purchase.create({
+      eventId: data.eventId,
+      type: "TICKET",
+      source: data.source,
+      paymentReference: reference,
+      amount,
+      ticketTypeId: data.ticketTypeId,
+      ticketQuantity: data.quantity,
+      expiresAt,
+      customerEmail: `${data.customerPhone}@ussd.easevote.com`,
+      customerPhone: data.customerPhone
+    });
+
+    const gateway = await this.getUSSDPaymentGateway();
+    const gatewayService = this.getGatewayService(gateway);
+    
+    const paymentData = await gatewayService.initializeUSSDPayment({
+      email: `${data.customerPhone}@ussd.easevote.com`,
+      amount,
+      reference,
+      network: data.network,
+      customerPhone: data.customerPhone,
+      callback_url: `${process.env.FRONTEND_URL}/payment/callback`,
+      metadata: {
+        purchaseId: purchase._id,
+        eventId: data.eventId,
+        type: "TICKET",
+        source: "ussd"
+      }
+    });
+
+    return {
+      purchase,
+      paymentUrl: paymentData.success ? "USSD_INITIATED" : "FAILED",
+      reference
+    };
+  }
+
+  static async initializeVotePurchaseUSSD(data: {
+    eventId: string;
+    candidateId: string;
+    categoryId: string;
+    voteCount: number;
+    customerPhone: string;
+    network: string;
+    source: "ussd";
+  }) {
+    const event = await Event.findById(data.eventId);
+    if (!event) {
+      throw new AppError("Event not found", 404);
+    }
+
+    if (event.status !== "PUBLISHED" && event.status !== "LIVE") {
+      throw new AppError("Event not available for voting", 400);
+    }
+
+    const now = new Date();
+    if (event.votingStartTime && now < event.votingStartTime) {
+      throw new AppError("Voting has not started yet", 400);
+    }
+    if (event.votingEndTime && now > event.votingEndTime) {
+      throw new AppError("Voting has ended", 400);
+    }
+
+    if (!event.costPerVote) {
+      throw new AppError("Voting not configured for this event", 400);
+    }
+
+    if (event.minVotesPerPurchase && data.voteCount < event.minVotesPerPurchase) {
+      throw new AppError(`Minimum ${event.minVotesPerPurchase} votes required`, 400);
+    }
+
+    if (event.maxVotesPerPurchase && data.voteCount > event.maxVotesPerPurchase) {
+      throw new AppError(`Maximum ${event.maxVotesPerPurchase} votes allowed`, 400);
+    }
+
+    const amount = event.costPerVote * data.voteCount;
+    const reference = this.generateReference();
+    const expiresAt = new Date(Date.now() + 30.5 * 60 * 1000);
+
+    const purchase = await Purchase.create({
+      eventId: data.eventId,
+      type: "VOTE",
+      source: data.source,
+      paymentReference: reference,
+      amount,
+      candidateId: data.candidateId,
+      categoryId: data.categoryId,
+      voteCount: data.voteCount,
+      expiresAt,
+      customerEmail: `${data.customerPhone}@ussd.easevote.com`,
+      customerPhone: data.customerPhone
+    });
+
+    const gateway = await this.getUSSDPaymentGateway();
+    const gatewayService = this.getGatewayService(gateway);
+    
+    const paymentData = await gatewayService.initializeUSSDPayment({
+      email: `${data.customerPhone}@ussd.easevote.com`,
+      amount,
+      reference,
+      network: data.network,
+      customerPhone: data.customerPhone,
+      callback_url: `${process.env.FRONTEND_URL}/payment/callback`,
+      metadata: {
+        purchaseId: purchase._id,
+        eventId: data.eventId,
+        type: "VOTE",
+        source: "ussd"
+      }
+    });
+
+    return {
+      purchase,
+      paymentUrl: paymentData.success ? "USSD_INITIATED" : "FAILED",
+      reference
+    };
+  }
+
+  private static async getUSSDPaymentGateway(): Promise<PaymentGateway> {
+    const setting = await Settings.findOne({ key: "ussd_payment_gateway" });
+    return (setting?.value as PaymentGateway) || 'appsmobile';
   }
 }

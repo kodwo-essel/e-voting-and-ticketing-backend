@@ -1,10 +1,11 @@
 import axios from "axios";
 import crypto from "crypto";
 import { AppError } from "../middleware/error.middleware";
-import { IPaymentGateway, PaymentInitializationData, PaymentInitializationResult, PaymentVerificationResult, WebhookResult } from "../payment-gateway.interface";
+import { IPaymentGateway, PaymentInitializationData, PaymentInitializationResult, PaymentVerificationResult, WebhookResult, USSDPaymentInitializationData, USSDPaymentInitializationResult } from "../payment-gateway.interface";
 
 export class AppsMobileService implements IPaymentGateway {
   private readonly baseURL = "https://payments.anmgw.com";
+  private readonly orchardURL = "https://orchard-api.anmgw.com";
   private readonly clientId = process.env.APPS_MOBILE_CLIENT_ID;
   private readonly clientSecret = process.env.APPS_MOBILE_CLIENT_SECRET;
   private readonly serviceId = process.env.APPS_MOBILE_SERVICE_ID;
@@ -22,6 +23,7 @@ export class AppsMobileService implements IPaymentGateway {
     try {
       const payload = {
         amount: data.amount.toFixed(2),
+        currency_val: "GHS",
         callback_url: data.callback_url,
         exttrid: data.reference,
         reference: "EaseVote Payment",
@@ -106,5 +108,72 @@ export class AppsMobileService implements IPaymentGateway {
     }
 
     return { isValid: false };
+  }
+
+  private mapNetworkCode(network: string): string {
+    if (!network) {
+      console.log('Network is undefined, defaulting to MTN');
+      return 'MTN';
+    }
+    
+    const networkMap: { [key: string]: string } = {
+      'MTN': 'MTN',
+      'VODAFONE': 'VOD',
+      'AIRTELTIGO': 'AIR',
+      'AIRTEL': 'AIR',
+      'TIGO': 'AIR'
+    };
+    
+    return networkMap[network.toUpperCase()] || 'MTN';
+  }
+
+  async initializeUSSDPayment(data: USSDPaymentInitializationData): Promise<USSDPaymentInitializationResult> {
+    try {
+      console.log('USSD Payment Data:', { network: data.network, phone: data.customerPhone });
+      
+      const payload = {
+        customer_number: data.customerPhone,
+        amount: data.amount.toFixed(2),
+        exttrid: data.reference,
+        reference: "EaseVote Payment",
+        nw: this.mapNetworkCode(data.network),
+        trans_type: "CTM",
+        callback_url: data.callback_url,
+        service_id: this.serviceId,
+        ts: new Date().toISOString().replace('T', ' ').substring(0, 19),
+        nickname: "EaseVote"
+      };
+
+      console.log('Payment Payload:', payload);
+
+      const payloadString = JSON.stringify(payload);
+      
+      const response = await axios.post(
+        `${this.orchardURL}/sendRequest`,
+        payload,
+        {
+          headers: {
+            "Authorization": this.getAuthHeader(payloadString),
+            "Content-Type": "application/json",
+          },
+        }
+      );
+
+      const isSuccess = response.data.resp_code === "015";
+      
+      return {
+        success: isSuccess,
+        reference: data.reference,
+        message: response.data.resp_desc || "Payment initiated"
+      };
+    } catch (error: any) {
+      console.error("AppsMobile USSD payment error:", {
+        message: error.message,
+        response: error.response?.data,
+        status: error.response?.status,
+        config: error.config
+      });
+      throw new AppError(`USSD payment initiation failed: ${error.message}`, 500);
+    }
   }
 }
