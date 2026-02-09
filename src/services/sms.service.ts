@@ -1,0 +1,60 @@
+import { ISMSService, SMSData } from "../sms.interface";
+import { TermiiSMSService } from "./termii-sms.service";
+import { NaloSMSService } from "./nalo-sms.service";
+
+type SMSProvider = "termii" | "nalo";
+
+export class SMSService {
+  private static getProvider(): SMSProvider {
+    return (process.env.SMS_PROVIDER as SMSProvider) || "nalo";
+  }
+
+  private static getService(): ISMSService {
+    const provider = this.getProvider();
+    
+    switch (provider) {
+      case "termii":
+        return new TermiiSMSService();
+      case "nalo":
+        return new NaloSMSService();
+      default:
+        return new NaloSMSService();
+    }
+  }
+
+  static async sendVerificationCode(phone: string, code: string) {
+    const service = this.getService();
+    
+    return service.sendSMS({
+      to: phone,
+      message: `Your EaseVote verification code is: ${code}. Valid for 10 minutes.`,
+    });
+  }
+
+  static async sendVoteConfirmation(phone: string, candidateName: string, voteCount: number) {
+    const service = this.getService();
+    
+    return service.sendSMS({
+      to: phone,
+      message: `Vote confirmed! You voted ${voteCount} time(s) for ${candidateName}. Thank you for participating!`,
+    });
+  }
+
+  static async sendTicketConfirmation(phone: string, eventTitle: string, ticketCount: number) {
+    const service = this.getService();
+    
+    return service.sendSMS({
+      to: phone,
+      message: `Ticket purchase confirmed! ${ticketCount} ticket(s) for "${eventTitle}". Check your email for details.`,
+    });
+  }
+
+  static async sendCustomMessage(phone: string, message: string) {
+    const service = this.getService();
+    
+    return service.sendSMS({
+      to: phone,
+      message,
+    });
+  }
+}
