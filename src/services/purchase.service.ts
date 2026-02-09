@@ -5,6 +5,7 @@ import { Settings } from "../models/Settings.model";
 import { PaystackService } from "./paystack.service";
 import { FlutterwaveService } from "./flutterwave.service";
 import { AppError } from "../middleware/error.middleware";
+import { PaginationHelper } from "../utils/pagination.util";
 import crypto from "crypto";
 import { IPurchase } from "../models/Purchase.model";
 import { IPaymentGateway } from "../payment-gateway.interface";
@@ -135,6 +136,15 @@ export class PurchaseService {
 
     if (event.status !== "PUBLISHED" && event.status !== "LIVE") {
       throw new AppError("Event not available for voting", 400);
+    }
+
+    // Check voting time window
+    const now = new Date();
+    if (event.votingStartTime && now < event.votingStartTime) {
+      throw new AppError("Voting has not started yet", 400);
+    }
+    if (event.votingEndTime && now > event.votingEndTime) {
+      throw new AppError("Voting has ended", 400);
     }
 
     if (!event.costPerVote) {
@@ -303,13 +313,22 @@ export class PurchaseService {
     await event.save();
   }
 
-  static async getPurchaseHistory(userId: string) {
-    return await Purchase.find({ userId })
-      .populate("eventId", "title type")
-      .sort({ createdAt: -1 });
+  static async getPurchaseHistory(userId: string, query: any) {
+    const { page, limit, skip } = PaginationHelper.getParams(query);
+    
+    const [purchases, total] = await Promise.all([
+      Purchase.find({ userId })
+        .populate("eventId", "title type")
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit),
+      Purchase.countDocuments({ userId })
+    ]);
+
+    return PaginationHelper.formatResponse(purchases, total, page, limit);
   }
 
-  static async getEventPurchases(eventId: string, organizerId: string) {
+  static async getEventPurchases(eventId: string, organizerId: string, query: any) {
     const event = await Event.findById(eventId);
     if (!event) {
       throw new AppError("Event not found", 404);
@@ -319,9 +338,18 @@ export class PurchaseService {
       throw new AppError("Unauthorized", 403);
     }
 
-    return await Purchase.find({ eventId, status: "PAID" })
-      .populate("userId", "fullName email")
-      .sort({ createdAt: -1 });
+    const { page, limit, skip } = PaginationHelper.getParams(query);
+    
+    const [purchases, total] = await Promise.all([
+      Purchase.find({ eventId, status: "PAID" })
+        .populate("userId", "fullName email")
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit),
+      Purchase.countDocuments({ eventId, status: "PAID" })
+    ]);
+
+    return PaginationHelper.formatResponse(purchases, total, page, limit);
   }
 
   static async handleWebhook(req: any): Promise<{ success: boolean }> {

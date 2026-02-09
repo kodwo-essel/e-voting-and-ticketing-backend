@@ -34,12 +34,12 @@ export const paymentWebhook = asyncHandler(async (req: Request, res: Response) =
 });
 
 export const getPurchaseHistory = asyncHandler(async (req: Request, res: Response) => {
-  const purchases = await PurchaseService.getPurchaseHistory(req.user!.id);
-  res.json(purchases);
+  const result = await PurchaseService.getPurchaseHistory(req.user!.id, req.query);
+  res.json(result);
 });
 
 export const getEventPurchases = asyncHandler(async (req: Request, res: Response) => {
   const eventId = Array.isArray(req.params.eventId) ? req.params.eventId[0] : req.params.eventId;
-  const purchases = await PurchaseService.getEventPurchases(eventId, req.user!.id);
-  res.json(purchases);
+  const result = await PurchaseService.getEventPurchases(eventId, req.user!.id, req.query);
+  res.json(result);
 });

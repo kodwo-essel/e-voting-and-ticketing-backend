@@ -1,5 +1,6 @@
 import { Event, IEvent } from "../models/Event.model";
 import { AppError } from "../middleware/error.middleware";
+import { PaginationHelper } from "../utils/pagination.util";
 import { CandidateService } from "./candidate.service";
 import { CategoryService } from "./category.service";
 import { TicketService } from "./ticket.service";
@@ -15,13 +16,71 @@ export class EventService {
     return crypto.randomBytes(2).toString("hex").toUpperCase();
   }
 
-  static filterEventResponse(event: any) {
+  static filterEventResponse(event: any, userId?: string, userRole?: string) {
     const eventObj = event.toObject ? event.toObject() : event;
+    
     if (eventObj.type === "VOTING") {
       delete eventObj.ticketTypes;
+      
+      // Check if user is organizer or admin - they always see full data
+      const isOwner = userId && eventObj.organizerId?._id?.toString() === userId;
+      const isAdmin = userRole && ["ADMIN", "SUPER_ADMIN"].includes(userRole);
+      
+      if (!isOwner && !isAdmin && eventObj.categories) {
+        // Apply live results and vote count settings for public users
+        eventObj.categories = eventObj.categories.map((category: any) => {
+          // Sort candidates by votes for ranking
+          let candidates = [...category.candidates].sort((a: any, b: any) => 
+            (b.votes || 0) - (a.votes || 0)
+          );
+          
+          // Apply display rules based on settings
+          candidates = candidates.map((candidate: any, index: number) => {
+            const candidateObj = { ...candidate };
+            
+            if (!eventObj.liveResults) {
+              // Hide both votes and rank
+              delete candidateObj.votes;
+              delete candidateObj.rank;
+            } else if (!eventObj.showVoteCount) {
+              // Show only rank, hide votes
+              candidateObj.rank = index + 1;
+              delete candidateObj.votes;
+            } else {
+              // Show both rank and votes
+              candidateObj.rank = index + 1;
+            }
+            
+            return candidateObj;
+          });
+          
+          return {
+            ...category,
+            candidates
+          };
+        });
+      } else if (eventObj.categories) {
+        // For organizers and admins, always show rank and votes
+        eventObj.categories = eventObj.categories.map((category: any) => {
+          let candidates = [...category.candidates].sort((a: any, b: any) => 
+            (b.votes || 0) - (a.votes || 0)
+          );
+          
+          candidates = candidates.map((candidate: any, index: number) => ({
+            ...candidate,
+            rank: index + 1
+          }));
+          
+          return {
+            ...category,
+            candidates
+          };
+        });
+      }
     } else if (eventObj.type === "TICKETING") {
       delete eventObj.categories;
     }
+    
     return eventObj;
   }
 
@@ -162,85 +221,88 @@ export class EventService {
       }
     }
     
-    // Filter response based on event type
-    const eventObj = event.toObject();
-    if (eventObj.type === "VOTING") {
-      delete eventObj.ticketTypes;
-    } else if (eventObj.type === "TICKETING") {
-      delete eventObj.categories;
-    }
-    
-    return eventObj;
+    // Filter response based on event type and settings
+    return this.filterEventResponse(event, userId, userRole);
   }
 
-  static async getEvents(filters: any = {}, userRole?: string, userId?: string) {
-    let query: any = { isDeleted: false };
+  static async getEvents(filters: any = {}, userRole?: string, userId?: string, query?: any) {
+    let dbQuery: any = { isDeleted: false };
 
     // Role-based filtering
     if (userRole === "ORGANIZER") {
-      query.organizerId = userId;
+      dbQuery.organizerId = userId;
     } else if (!userRole || userRole === "PUBLIC") {
-      query.status = { $in: ["PUBLISHED", "LIVE"] };
-      query.isPublic = true;
+      dbQuery.status = { $in: ["PUBLISHED", "LIVE"] };
+      dbQuery.isPublic = true;
     }
     // Admin and Super Admin can see all events (no additional filters)
 
     // Apply additional filters
-    if (filters.type) query.type = filters.type;
-    if (filters.status) query.status = filters.status;
+    if (filters.type) dbQuery.type = filters.type;
+    if (filters.status) dbQuery.status = filters.status;
     if (filters.organizerId && ["ADMIN", "SUPER_ADMIN"].includes(userRole)) {
-      query.organizerId = filters.organizerId;
+      dbQuery.organizerId = filters.organizerId;
     }
 
-    const events = await Event.find(query).populate("organizerId", "fullName email").sort({ createdAt: -1 });
+    const { page, limit, skip } = PaginationHelper.getParams(query || {});
     
-    // Filter response based on event type
-    return events.map(event => {
-      const eventObj = event.toObject();
-      if (eventObj.type === "VOTING") {
-        delete eventObj.ticketTypes;
-      } else if (eventObj.type === "TICKETING") {
-        delete eventObj.categories;
-      }
-      return eventObj;
-    });
+    const [events, total] = await Promise.all([
+      Event.find(dbQuery)
+        .populate("organizerId", "fullName email")
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit),
+      Event.countDocuments(dbQuery)
+    ]);
+    
+    // Filter response based on event type and apply vote display rules
+    const filteredEvents = events.map(event => this.filterEventResponse(event, userId, userRole));
+
+    return PaginationHelper.formatResponse(filteredEvents, total, page, limit);
   }
 
-  static async getMyEvents(userId: string, filters: any = {}) {
-    let query: any = { organizerId: userId, isDeleted: false };
+  static async getMyEvents(userId: string, filters: any = {}, query?: any) {
+    let dbQuery: any = { organizerId: userId, isDeleted: false };
     
-    if (filters.type) query.type = filters.type;
-    if (filters.status) query.status = filters.status;
+    if (filters.type) dbQuery.type = filters.type;
+    if (filters.status) dbQuery.status = filters.status;
 
-    const events = await Event.find(query).sort({ createdAt: -1 });
-    return events.map(event => {
-      const eventObj = event.toObject();
-      if (eventObj.type === "VOTING") {
-        delete eventObj.ticketTypes;
-      } else if (eventObj.type === "TICKETING") {
-        delete eventObj.categories;
-      }
-      return eventObj;
-    });
+    const { page, limit, skip } = PaginationHelper.getParams(query || {});
+    
+    const [events, total] = await Promise.all([
+      Event.find(dbQuery)
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit),
+      Event.countDocuments(dbQuery)
+    ]);
+    
+    const filteredEvents = events.map(event => this.filterEventResponse(event, userId, "ORGANIZER"));
+
+    return PaginationHelper.formatResponse(filteredEvents, total, page, limit);
   }
 
-  static async getAllEventsForAdmin(filters: any = {}) {
-    let query: any = { isDeleted: false };
+  static async getAllEventsForAdmin(filters: any = {}, query?: any) {
+    let dbQuery: any = { isDeleted: false };
     
-    if (filters.type) query.type = filters.type;
-    if (filters.status) query.status = filters.status;
-    if (filters.organizerId) query.organizerId = filters.organizerId;
+    if (filters.type) dbQuery.type = filters.type;
+    if (filters.status) dbQuery.status = filters.status;
+    if (filters.organizerId) dbQuery.organizerId = filters.organizerId;
 
-    const events = await Event.find(query).populate("organizerId", "fullName email").sort({ createdAt: -1 });
-    return events.map(event => {
-      const eventObj = event.toObject();
-      if (eventObj.type === "VOTING") {
-        delete eventObj.ticketTypes;
-      } else if (eventObj.type === "TICKETING") {
-        delete eventObj.categories;
-      }
-      return eventObj;
-    });
+    const { page, limit, skip } = PaginationHelper.getParams(query || {});
+    
+    const [events, total] = await Promise.all([
+      Event.find(dbQuery)
+        .populate("organizerId", "fullName email")
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit),
+      Event.countDocuments(dbQuery)
+    ]);
+    
+    const filteredEvents = events.map(event => this.filterEventResponse(event, undefined, "ADMIN"));
+
+    return PaginationHelper.formatResponse(filteredEvents, total, page, limit);
   }
 
   static async getDeletedEvents(userRole: string) {
@@ -387,5 +449,61 @@ export class EventService {
     await event.save();
     
     return { message: "Event deleted successfully" };
+  }
+
+  static async toggleLiveResults(eventId: string, organizerId: string, userRole: string) {
+    const event = await Event.findById(eventId);
+    if (!event) {
+      throw new AppError("Event not found", 404);
+    }
+
+    // Permission check
+    const isOwner = event.organizerId.toString() === organizerId;
+    const isAdmin = ["ADMIN", "SUPER_ADMIN"].includes(userRole);
+    
+    if (!isOwner && !isAdmin) {
+      throw new AppError("Unauthorized", 403);
+    }
+
+    if (event.type !== "VOTING") {
+      throw new AppError("Only voting events support live results", 400);
+    }
+
+    event.liveResults = !event.liveResults;
+    await event.save();
+    
+    return {
+      eventId,
+      liveResults: event.liveResults,
+      message: `Live results ${event.liveResults ? 'enabled' : 'disabled'}`
+    };
+  }
+
+  static async toggleShowVoteCount(eventId: string, organizerId: string, userRole: string) {
+    const event = await Event.findById(eventId);
+    if (!event) {
+      throw new AppError("Event not found", 404);
+    }
+
+    // Permission check
+    const isOwner = event.organizerId.toString() === organizerId;
+    const isAdmin = ["ADMIN", "SUPER_ADMIN"].includes(userRole);
+    
+    if (!isOwner && !isAdmin) {
+      throw new AppError("Unauthorized", 403);
+    }
+
+    if (event.type !== "VOTING") {
+      throw new AppError("Only voting events support vote count display", 400);
+    }
+
+    event.showVoteCount = !event.showVoteCount;
+    await event.save();
+    
+    return {
+      eventId,
+      showVoteCount: event.showVoteCount,
+      message: `Vote count display ${event.showVoteCount ? 'enabled' : 'disabled'}`
+    };
   }
 }
