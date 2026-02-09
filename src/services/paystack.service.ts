@@ -1,23 +1,19 @@
 import axios from "axios";
+import crypto from "crypto";
 import { AppError } from "../middleware/error.middleware";
+import { IPaymentGateway, PaymentInitializationData, PaymentInitializationResult, PaymentVerificationResult, WebhookResult } from "../payment-gateway.interface";
 
-export class PaystackService {
-  private static baseURL = "https://api.paystack.co";
-  private static secretKey = process.env.PAYSTACK_SECRET_KEY;
+export class PaystackService implements IPaymentGateway {
+  private readonly baseURL = "https://api.paystack.co";
+  private readonly secretKey = process.env.PAYSTACK_SECRET_KEY;
 
-  static async initializePayment(data: {
-    email: string;
-    amount: number;
-    reference: string;
-    callback_url?: string;
-    metadata?: any;
-  }) {
+  async initializePayment(data: PaymentInitializationData): Promise<PaymentInitializationResult> {
     try {
       const response = await axios.post(
         `${this.baseURL}/transaction/initialize`,
         {
           ...data,
-          amount: data.amount * 100, // Convert to kobo
+          amount: data.amount * 100, // Convert to pesewas
         },
         {
           headers: {
@@ -34,7 +30,7 @@ export class PaystackService {
     }
   }
 
-  static async verifyPayment(reference: string) {
+  async verifyPayment(reference: string): Promise<PaymentVerificationResult> {
     try {
       const response = await axios.get(
         `${this.baseURL}/transaction/verify/${reference}`,
@@ -50,5 +46,35 @@ export class PaystackService {
       console.error("Paystack verification error:", error.response?.data);
       throw new AppError("Payment verification failed", 500);
     }
+  }
+
+  async handleWebhook(req: any): Promise<WebhookResult> {
+    const hash = crypto.createHmac('sha512', process.env.PAYSTACK_SECRET_KEY!)
+      .update(JSON.stringify(req.body))
+      .digest('hex');
+
+    if (hash !== req.headers['x-paystack-signature']) {
+      return { isValid: false };
+    }
+
+    const event = req.body;
+    
+    if (event.event === 'charge.success') {
+      return { 
+        isValid: true, 
+        reference: event.data.reference,
+        status: 'success'
+      };
+    }
+
+    if (event.event === 'charge.failed' || event.event === 'charge.abandoned') {
+      return { 
+        isValid: true, 
+        reference: event.data.reference,
+        status: 'failed'
+      };
+    }
+
+    return { isValid: false };
   }
 }

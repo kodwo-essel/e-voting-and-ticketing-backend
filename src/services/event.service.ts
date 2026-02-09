@@ -1,6 +1,10 @@
 import { Event, IEvent } from "../models/Event.model";
 import { AppError } from "../middleware/error.middleware";
+import { CandidateService } from "./candidate.service";
+import { CategoryService } from "./category.service";
+import { TicketService } from "./ticket.service";
 import crypto from "crypto";
+import mongoose from "mongoose";
 
 export class EventService {
   static generateEventCode(): string {
@@ -11,27 +15,86 @@ export class EventService {
     return crypto.randomBytes(2).toString("hex").toUpperCase();
   }
 
-  static async createEvent(eventData: any, organizerId: string) {
+  static filterEventResponse(event: any) {
+    const eventObj = event.toObject ? event.toObject() : event;
+    if (eventObj.type === "VOTING") {
+      delete eventObj.ticketTypes;
+    } else if (eventObj.type === "TICKETING") {
+      delete eventObj.categories;
+    }
+    return eventObj;
+  }
+
+  static async createEvent(eventData: any, currentUserId: string, currentUserRole: string) {
     const eventCode = this.generateEventCode();
     
+    // Determine organizerId based on user role
+    let organizerId = currentUserId;
+    if (currentUserRole !== "ORGANIZER") {
+      if (!eventData.organizerId) {
+        throw new AppError("organizerId is required for non-organizer users", 400);
+      }
+      organizerId = eventData.organizerId;
+    }
+    
+    // Date validations
+    const startDate = new Date(eventData.startDate);
+    const endDate = new Date(eventData.endDate);
+    const now = new Date();
+
+    if (startDate < now) {
+      throw new AppError("Start date cannot be in the past", 400);
+    }
+
+    if (endDate < now) {
+      throw new AppError("End date cannot be in the past", 400);
+    }
+
+    if (endDate <= startDate) {
+      throw new AppError("End date must be later than start date", 400);
+    }
+    
+    console.log("Creating event with organizerId:", organizerId, "role:", currentUserRole);
+    
+    // Remove organizerId from eventData to avoid conflicts
+    const { organizerId: _, ...cleanEventData } = eventData;
+    
     const event = await Event.create({
-      ...eventData,
-      organizerId,
+      ...cleanEventData,
+      organizerId: new mongoose.Types.ObjectId(organizerId),
       eventCode,
       status: "DRAFT"
     });
 
-    return event;
+    // Populate organizer and return with id field
+    const populatedEvent = await Event.findById(event._id).populate("organizerId", "fullName email");
+    
+    console.log("Populated event:", populatedEvent);
+    console.log("OrganizerId in event:", event.organizerId);
+    
+    // Transform response to rename organizerId to organizer
+    const eventObj = populatedEvent?.toObject();
+    if (eventObj && eventObj.organizerId) {
+      eventObj.organizer = eventObj.organizerId;
+      delete eventObj.organizerId;
+    } else {
+      console.log("No organizerId found or population failed");
+    }
+    
+    return eventObj;
   }
 
   static async updateEvent(eventId: string, updateData: any, organizerId: string, userRole: string) {
-    const event = await Event.findById(eventId);
+    const event = await Event.findOne({ _id: eventId, isDeleted: false });
     if (!event) {
       throw new AppError("Event not found", 404);
     }
 
     // Permission check
-    if (userRole === "ORGANIZER" && event.organizerId.toString() !== organizerId) {
+    const isOwner = event.organizerId.toString() === organizerId;
+    const isAdmin = ["ADMIN", "SUPER_ADMIN"].includes(userRole);
+    
+    if (!isOwner && !isAdmin) {
       throw new AppError("Unauthorized", 403);
     }
 
@@ -40,21 +103,78 @@ export class EventService {
       throw new AppError("Cannot modify live event", 400);
     }
 
-    Object.assign(event, updateData);
+    // Only allow specific fields to be updated
+    const allowedFields = [
+      'title', 'description', 'startDate', 'endDate', 'venue', 'isPublic',
+      'costPerVote', 'minVotesPerPurchase', 'maxVotesPerPurchase', 'allowPublicNominations'
+    ];
+    
+    const filteredData: any = {};
+    for (const field of allowedFields) {
+      if (updateData[field] !== undefined) {
+        filteredData[field] = updateData[field];
+      }
+    }
+
+    // Date validations
+    const startDate = new Date(filteredData.startDate || event.startDate);
+    const endDate = new Date(filteredData.endDate || event.endDate);
+    const now = new Date();
+
+    if (filteredData.startDate && startDate < now) {
+      throw new AppError("Start date cannot be in the past", 400);
+    }
+
+    if (filteredData.endDate && endDate < now) {
+      throw new AppError("End date cannot be in the past", 400);
+    }
+
+    if (endDate <= startDate) {
+      throw new AppError("End date must be later than start date", 400);
+    }
+
+    Object.assign(event, filteredData);
     await event.save();
     return event;
   }
 
-  static async getEvent(eventId: string) {
-    const event = await Event.findById(eventId).populate("organizerId", "fullName email");
+  static async getEvent(eventId: string, userId?: string, userRole?: string) {
+    const event = await Event.findOne({ _id: eventId, isDeleted: false }).populate("organizerId", "fullName email");
     if (!event) {
       throw new AppError("Event not found", 404);
     }
-    return event;
+
+    // Check if event is publicly accessible
+    const isPubliclyAccessible = ["PUBLISHED", "LIVE"].includes(event.status) && event.isPublic;
+    
+    if (!isPubliclyAccessible) {
+      // Require authentication for non-public events
+      if (!userId || !userRole) {
+        throw new AppError("Authentication required", 401);
+      }
+      
+      // Check if user has permission to view this event
+      const isOwner = event.organizerId._id?.toString() === userId;
+      const isAdmin = ["ADMIN", "SUPER_ADMIN"].includes(userRole);
+      
+      if (!isOwner && !isAdmin) {
+        throw new AppError("Access denied", 403);
+      }
+    }
+    
+    // Filter response based on event type
+    const eventObj = event.toObject();
+    if (eventObj.type === "VOTING") {
+      delete eventObj.ticketTypes;
+    } else if (eventObj.type === "TICKETING") {
+      delete eventObj.categories;
+    }
+    
+    return eventObj;
   }
 
   static async getEvents(filters: any = {}, userRole?: string, userId?: string) {
-    let query: any = {};
+    let query: any = { isDeleted: false };
 
     // Role-based filtering
     if (userRole === "ORGANIZER") {
@@ -63,12 +183,81 @@ export class EventService {
       query.status = { $in: ["PUBLISHED", "LIVE"] };
       query.isPublic = true;
     }
+    // Admin and Super Admin can see all events (no additional filters)
 
     // Apply additional filters
     if (filters.type) query.type = filters.type;
     if (filters.status) query.status = filters.status;
+    if (filters.organizerId && ["ADMIN", "SUPER_ADMIN"].includes(userRole)) {
+      query.organizerId = filters.organizerId;
+    }
 
-    return await Event.find(query).populate("organizerId", "fullName email").sort({ createdAt: -1 });
+    const events = await Event.find(query).populate("organizerId", "fullName email").sort({ createdAt: -1 });
+    
+    // Filter response based on event type
+    return events.map(event => {
+      const eventObj = event.toObject();
+      if (eventObj.type === "VOTING") {
+        delete eventObj.ticketTypes;
+      } else if (eventObj.type === "TICKETING") {
+        delete eventObj.categories;
+      }
+      return eventObj;
+    });
+  }
+
+  static async getMyEvents(userId: string, filters: any = {}) {
+    let query: any = { organizerId: userId, isDeleted: false };
+    
+    if (filters.type) query.type = filters.type;
+    if (filters.status) query.status = filters.status;
+
+    const events = await Event.find(query).sort({ createdAt: -1 });
+    return events.map(event => {
+      const eventObj = event.toObject();
+      if (eventObj.type === "VOTING") {
+        delete eventObj.ticketTypes;
+      } else if (eventObj.type === "TICKETING") {
+        delete eventObj.categories;
+      }
+      return eventObj;
+    });
+  }
+
+  static async getAllEventsForAdmin(filters: any = {}) {
+    let query: any = { isDeleted: false };
+    
+    if (filters.type) query.type = filters.type;
+    if (filters.status) query.status = filters.status;
+    if (filters.organizerId) query.organizerId = filters.organizerId;
+
+    const events = await Event.find(query).populate("organizerId", "fullName email").sort({ createdAt: -1 });
+    return events.map(event => {
+      const eventObj = event.toObject();
+      if (eventObj.type === "VOTING") {
+        delete eventObj.ticketTypes;
+      } else if (eventObj.type === "TICKETING") {
+        delete eventObj.categories;
+      }
+      return eventObj;
+    });
+  }
+
+  static async getDeletedEvents(userRole: string) {
+    if (!["ADMIN", "SUPER_ADMIN"].includes(userRole)) {
+      throw new AppError("Access denied", 403);
+    }
+
+    const events = await Event.find({ isDeleted: true }).populate("organizerId", "fullName email").sort({ deletedAt: -1 });
+    return events.map(event => {
+      const eventObj = event.toObject();
+      if (eventObj.type === "VOTING") {
+        delete eventObj.ticketTypes;
+      } else if (eventObj.type === "TICKETING") {
+        delete eventObj.categories;
+      }
+      return eventObj;
+    });
   }
 
   static async submitForReview(eventId: string, organizerId: string) {
@@ -128,73 +317,57 @@ export class EventService {
     return event;
   }
 
+  // Delegate to other services
   static async addCategory(eventId: string, categoryData: any, organizerId: string) {
-    const event = await Event.findById(eventId);
-    if (!event) {
-      throw new AppError("Event not found", 404);
-    }
+    return CategoryService.addCategory(eventId, categoryData, organizerId);
+  }
 
-    if (event.organizerId.toString() !== organizerId) {
-      throw new AppError("Unauthorized", 403);
-    }
+  static async getEventCategories(eventId: string, userId?: string, userRole?: string) {
+    return CategoryService.getEventCategories(eventId, userId, userRole);
+  }
 
-    if (event.type !== "VOTING") {
-      throw new AppError("Categories can only be added to voting events", 400);
-    }
+  static async getCategoryWithCandidates(eventId: string, categoryId: string, userId?: string, userRole?: string) {
+    return CategoryService.getCategoryWithCandidates(eventId, categoryId, userId, userRole);
+  }
 
-    event.categories = event.categories || [];
-    event.categories.push(categoryData);
-    await event.save();
-    return event;
+  static async updateCategory(eventId: string, categoryId: string, updateData: any, userId: string, userRole: string) {
+    return CategoryService.updateCategory(eventId, categoryId, updateData, userId, userRole);
+  }
+
+  static async deleteCategory(eventId: string, categoryId: string, userId: string, userRole: string) {
+    return CategoryService.deleteCategory(eventId, categoryId, userId, userRole);
   }
 
   static async addCandidate(eventId: string, categoryId: string, candidateData: any, organizerId: string) {
-    const event = await Event.findById(eventId);
-    if (!event) {
-      throw new AppError("Event not found", 404);
-    }
+    return CandidateService.addCandidate(eventId, categoryId, candidateData, organizerId);
+  }
 
-    if (event.organizerId.toString() !== organizerId) {
-      throw new AppError("Unauthorized", 403);
-    }
+  static async getCandidate(eventId: string, candidateCode: string, userId?: string, userRole?: string) {
+    return CandidateService.getCandidate(eventId, candidateCode, userId, userRole);
+  }
 
-    const category = event.categories?.id(categoryId);
-    if (!category) {
-      throw new AppError("Category not found", 404);
-    }
+  static async updateCandidate(eventId: string, categoryId: string, candidateId: string, updateData: any, userId: string, userRole: string) {
+    return CandidateService.updateCandidate(eventId, categoryId, candidateId, updateData, userId, userRole);
+  }
 
-    const candidateCode = this.generateCandidateCode();
-    category.candidates.push({
-      ...candidateData,
-      code: candidateCode
-    });
-
-    await event.save();
-    return event;
+  static async deleteCandidate(eventId: string, categoryId: string, candidateId: string, userId: string, userRole: string) {
+    return CandidateService.deleteCandidate(eventId, categoryId, candidateId, userId, userRole);
   }
 
   static async addTicketType(eventId: string, ticketData: any, organizerId: string) {
-    const event = await Event.findById(eventId);
-    if (!event) {
-      throw new AppError("Event not found", 404);
-    }
+    return TicketService.addTicketType(eventId, ticketData, organizerId);
+  }
 
-    if (event.organizerId.toString() !== organizerId) {
-      throw new AppError("Unauthorized", 403);
-    }
+  static async updateTicketType(eventId: string, ticketTypeId: string, updateData: any, userId: string, userRole: string) {
+    return TicketService.updateTicketType(eventId, ticketTypeId, updateData, userId, userRole);
+  }
 
-    if (event.type !== "TICKETING") {
-      throw new AppError("Ticket types can only be added to ticketing events", 400);
-    }
-
-    event.ticketTypes = event.ticketTypes || [];
-    event.ticketTypes.push(ticketData);
-    await event.save();
-    return event;
+  static async deleteTicketType(eventId: string, ticketTypeId: string, userId: string, userRole: string) {
+    return TicketService.deleteTicketType(eventId, ticketTypeId, userId, userRole);
   }
 
   static async deleteEvent(eventId: string, organizerId: string, userRole: string) {
-    const event = await Event.findById(eventId);
+    const event = await Event.findOne({ _id: eventId, isDeleted: false });
     if (!event) {
       throw new AppError("Event not found", 404);
     }
@@ -208,7 +381,11 @@ export class EventService {
       throw new AppError("Cannot delete live or ended events", 400);
     }
 
-    await Event.findByIdAndDelete(eventId);
+    // Soft delete
+    event.isDeleted = true;
+    event.deletedAt = new Date();
+    await event.save();
+    
     return { message: "Event deleted successfully" };
   }
 }

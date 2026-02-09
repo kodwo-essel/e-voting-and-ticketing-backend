@@ -21,7 +21,12 @@ export const authenticate = async (
     if (!user || user.tokenVersion !== decoded.tokenVersion)
       return res.status(401).json({ message: "Session expired" });
 
-    (req as any).user = decoded;
+    (req as any).user = {
+      id: decoded.sub,
+      role: decoded.role,
+      status: decoded.status,
+      tokenVersion: decoded.tokenVersion
+    };
     next();
   } catch {
     return res.status(401).json({ message: "Invalid token" });

@@ -3,6 +3,8 @@ import mongoose, { Document, Schema } from "mongoose";
 export interface ICandidate {
   _id?: mongoose.Types.ObjectId;
   name: string;
+  email: string;
+  phone: string;
   imageUrl?: string;
   description?: string;
   code: string;
@@ -21,6 +23,7 @@ export interface ITicketType {
   name: string;
   price: number;
   quantity: number;
+  reserved?: number;
   sold?: number;
 }
 
@@ -32,6 +35,10 @@ export interface IEvent extends Document {
   status: "DRAFT" | "PENDING_REVIEW" | "APPROVED" | "PUBLISHED" | "LIVE" | "PAUSED" | "ENDED" | "CANCELLED" | "ARCHIVED";
   eventCode: string;
   imageUrl?: string;
+  
+  // Soft delete
+  isDeleted: boolean;
+  deletedAt?: Date;
   
   // Dates
   startDate: Date;
@@ -67,6 +74,8 @@ export interface IEvent extends Document {
 
 const candidateSchema = new Schema<ICandidate>({
   name: { type: String, required: true },
+  email: { type: String, required: true },
+  phone: { type: String, required: true },
   imageUrl: { type: String },
   description: { type: String },
   code: { type: String, required: true, unique: true },
@@ -83,6 +92,7 @@ const ticketTypeSchema = new Schema<ITicketType>({
   name: { type: String, required: true },
   price: { type: Number, required: true },
   quantity: { type: Number, required: true },
+  reserved: { type: Number, default: 0 },
   sold: { type: Number, default: 0 }
 });
 
@@ -99,6 +109,10 @@ const eventSchema = new Schema<IEvent>({
   eventCode: { type: String, required: true, unique: true },
   imageUrl: { type: String },
   
+  // Soft delete
+  isDeleted: { type: Boolean, default: false },
+  deletedAt: { type: Date },
+  
   startDate: { type: Date, required: true },
   endDate: { type: Date, required: true },
   nominationStartDate: { type: Date },
@@ -112,13 +126,43 @@ const eventSchema = new Schema<IEvent>({
   location: { type: String },
   isPublic: { type: Boolean, default: true },
   
-  costPerVote: { type: Number },
+  // Voting specific fields
+  costPerVote: { 
+    type: Number,
+    required: function(this: IEvent) { return this.type === 'VOTING'; }
+  },
   minVotesPerPurchase: { type: Number },
   maxVotesPerPurchase: { type: Number },
-  allowPublicNominations: { type: Boolean, default: false },
-  categories: [categorySchema],
+  allowPublicNominations: { 
+    type: Boolean, 
+    default: false,
+    validate: {
+      validator: function(this: IEvent) {
+        return this.type === 'VOTING' || !this.allowPublicNominations;
+      },
+      message: 'allowPublicNominations is only valid for VOTING events'
+    }
+  },
+  categories: {
+    type: [categorySchema],
+    validate: {
+      validator: function(this: IEvent) {
+        return this.type === 'VOTING' || !this.categories?.length;
+      },
+      message: 'categories are only valid for VOTING events'
+    }
+  },
   
-  ticketTypes: [ticketTypeSchema]
+  // Ticketing specific fields
+  ticketTypes: {
+    type: [ticketTypeSchema],
+    validate: {
+      validator: function(this: IEvent) {
+        return this.type === 'TICKETING' || !this.ticketTypes?.length;
+      },
+      message: 'ticketTypes are only valid for TICKETING events'
+    }
+  }
 }, {
   timestamps: true
 });

@@ -10,18 +10,18 @@ export const getTicketsByPurchase = asyncHandler(async (req: Request, res: Respo
 
 export const scanTicket = asyncHandler(async (req: Request, res: Response) => {
   const { ticketNumber } = req.body;
-  const ticket = await TicketService.scanTicket(ticketNumber, req.user.id);
+  const ticket = await TicketService.scanTicket(ticketNumber, req.user!.id);
   res.json(ticket);
 });
 
 export const getEventTickets = asyncHandler(async (req: Request, res: Response) => {
   const eventId = Array.isArray(req.params.eventId) ? req.params.eventId[0] : req.params.eventId;
-  const tickets = await TicketService.getEventTickets(eventId, req.user.id);
+  const tickets = await TicketService.getEventTickets(eventId, req.user!.id);
   res.json(tickets);
 });
 
 export const getTicketStats = asyncHandler(async (req: Request, res: Response) => {
   const eventId = Array.isArray(req.params.eventId) ? req.params.eventId[0] : req.params.eventId;
-  const stats = await TicketService.getTicketStats(eventId, req.user.id);
+  const stats = await TicketService.getTicketStats(eventId, req.user!.id);
   res.json(stats);
 });
