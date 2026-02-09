@@ -66,6 +66,7 @@ export interface IEvent extends Document {
   votingEndTime?: Date;
   liveResults?: boolean;
   showVoteCount?: boolean;
+  whatsappGroupLink?: string;
   categories?: ICategory[];
   
   // Ticketing specific
@@ -151,6 +152,7 @@ const eventSchema = new Schema<IEvent>({
   votingEndTime: { type: Date },
   liveResults: { type: Boolean, default: true },
   showVoteCount: { type: Boolean, default: true },
+  whatsappGroupLink: { type: String },
   categories: {
     type: [categorySchema],
     validate: {

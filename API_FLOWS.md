@@ -35,6 +35,22 @@ This document outlines the complete API flows for different user journeys in the
 
 ---
 
+## 📳 PAYMENT GATEWAY MANAGEMENT
+
+### Admin: Configure Payment Gateway
+```
+1. GET /api/settings/payment-gateway
+   Headers: { Authorization: "Bearer {adminToken}" }
+   → Returns: { gateway: "paystack" | "flutterwave" | "appsmobile" }
+
+2. POST /api/settings/payment-gateway
+   Headers: { Authorization: "Bearer {adminToken}" }
+   Body: { gateway: "appsmobile" }
+   → Updates default payment gateway
+```
+
+---
+
 ## 🎫 TICKETING EVENT FLOW
 
 ### Organizer: Create Ticketing Event

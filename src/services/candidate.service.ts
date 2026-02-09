@@ -1,11 +1,26 @@
 import { Event } from "../models/Event.model";
 import { AppError } from "../middleware/error.middleware";
 import { EventService } from "./event.service";
+import { SMSService } from "./sms.service";
 import crypto from "crypto";
 
 export class CandidateService {
   static generateCandidateCode(): string {
     return crypto.randomBytes(2).toString("hex").toUpperCase();
+  }
+
+  static async sendCandidateWelcomeSMS(candidateName: string, candidatePhone: string, eventTitle: string, categoryName: string, whatsappGroupLink?: string) {
+    try {
+      let message = `Hello ${candidateName}! You've been added as a candidate for "${eventTitle}" in the "${categoryName}" category. Good luck!`;
+      
+      if (whatsappGroupLink) {
+        message += ` Join the candidates' WhatsApp group: ${whatsappGroupLink}`;
+      }
+      
+      await SMSService.sendCustomMessage(candidatePhone, message);
+    } catch (error) {
+      console.error('Failed to send candidate welcome SMS:', error);
+    }
   }
 
   static async addCandidate(eventId: string, categoryId: string, candidateData: any, organizerId: string) {
@@ -24,12 +39,25 @@ export class CandidateService {
     }
 
     const candidateCode = this.generateCandidateCode();
-    category.candidates.push({
+    const newCandidate = {
       ...candidateData,
       code: candidateCode
-    });
-
+    };
+    
+    category.candidates.push(newCandidate);
     await event.save();
+    
+    // Send welcome SMS to candidate
+    if (candidateData.phone) {
+      await this.sendCandidateWelcomeSMS(
+        candidateData.name,
+        candidateData.phone,
+        event.title,
+        category.name,
+        event.whatsappGroupLink
+      );
+    }
+
     return EventService.filterEventResponse(event, organizerId, undefined);
   }
 

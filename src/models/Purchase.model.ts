@@ -5,6 +5,7 @@ export interface IPurchase extends Document {
   userId?: mongoose.Types.ObjectId;
   type: "TICKET" | "VOTE";
   status: "PENDING" | "PAID" | "EXPIRED" | "CANCELLED" | "FAILED";
+  source: "web" | "ussd";
   
   // Payment details
   paymentReference: string;
@@ -40,6 +41,7 @@ const purchaseSchema = new Schema<IPurchase>({
   userId: { type: Schema.Types.ObjectId, ref: "User" },
   type: { type: String, enum: ["TICKET", "VOTE"], required: true },
   status: { type: String, enum: ["PENDING", "PAID", "EXPIRED", "CANCELLED", "FAILED"], default: "PENDING" },
+  source: { type: String, enum: ["web", "ussd"], default: "web" },
   
   paymentReference: { type: String, required: true, unique: true },
   paymentGateway: { type: String, enum: ["PAYSTACK"], default: "PAYSTACK" },

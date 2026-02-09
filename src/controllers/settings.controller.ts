@@ -1,38 +1,20 @@
 import { Request, Response } from "express";
-import { Settings } from "../models/Settings.model";
-import { AppError } from "../middleware/error.middleware";
+import { SettingsService } from "../services/settings.service";
+import { asyncHandler } from "../middleware/error.middleware";
 
-export class SettingsController {
-  static async getPaymentGateway(req: Request, res: Response) {
-    const setting = await Settings.findOne({ key: "payment_gateway" });
-    
-    res.json({
-      success: true,
-      data: {
-        gateway: setting?.value || "paystack"
-      }
-    });
-  }
+export const updateSetting = asyncHandler(async (req: Request, res: Response) => {
+  const { key, value } = req.body;
+  const setting = await SettingsService.updateSetting(key, value, req.user!.id);
+  res.json(setting);
+});
 
-  static async setPaymentGateway(req: Request, res: Response) {
-    const { gateway } = req.body;
-    
-    if (!["paystack", "flutterwave"].includes(gateway)) {
-      throw new AppError("Invalid payment gateway", 400);
-    }
+export const getSetting = asyncHandler(async (req: Request, res: Response) => {
+  const key = Array.isArray(req.params.key) ? req.params.key[0] : req.params.key;
+  const value = await SettingsService.getSetting(key);
+  res.json({ key, value });
+});
 
-    await Settings.findOneAndUpdate(
-      { key: "payment_gateway" },
-      { 
-        value: gateway,
-        updatedBy: req.user.id
-      },
-      { upsert: true, new: true }
-    );
-
-    res.json({
-      success: true,
-      message: `Payment gateway updated to ${gateway}`
-    });
-  }
-}
+export const getAllSettings = asyncHandler(async (req: Request, res: Response) => {
+  const settings = await SettingsService.getAllSettings();
+  res.json(settings);
+});
