@@ -495,6 +495,11 @@ export class PurchaseService {
 
     const gateway = await this.getUSSDPaymentGateway();
     const gatewayService = this.getGatewayService(gateway);
+
+    if (!gatewayService.initializeUSSDPayment) {
+      throw new AppError("Selected gateway does not support USSD payments", 400);
+    }
+
     
     const paymentData = await gatewayService.initializeUSSDPayment({
       email: `${data.customerPhone}@ussd.easevote.com`,
@@ -576,6 +581,11 @@ export class PurchaseService {
 
     const gateway = await this.getUSSDPaymentGateway();
     const gatewayService = this.getGatewayService(gateway);
+
+    if (!gatewayService.initializeUSSDPayment) {
+      throw new AppError("Selected gateway does not support USSD payments", 400);
+    }
+
     
     const paymentData = await gatewayService.initializeUSSDPayment({
       email: `${data.customerPhone}@ussd.easevote.com`,
